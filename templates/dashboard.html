@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="dashboard-head">
+    <div>
+        <h1>Job Applications</h1>
+        <p>Track applications, follow-ups, resumes, interview notes, and deadlines.</p>
+    </div>
+    <div class="dashboard-actions">
+        <a href="{{ url_for('export_csv') }}" class="btn btn-outline">Export CSV</a>
+        <a href="{{ url_for('add_job') }}" class="btn btn-primary">+ New Job</a>
+    </div>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <h3>{{ total_count }}</h3>
+        <p>Total</p>
+    </div>
+    <div class="stat-card">
+        <h3>{{ counts['Applied'] }}</h3>
+        <p>Applied</p>
+    </div>
+    <div class="stat-card">
+        <h3>{{ counts['Interview'] }}</h3>
+        <p>Interview</p>
+    </div>
+    <div class="stat-card">
+        <h3>{{ counts['Offer'] }}</h3>
+        <p>Offer</p>
+    </div>
+    <div class="stat-card warning-card">
+        <h3>{{ upcoming_followups }}</h3>
+        <p>Upcoming Follow-ups</p>
+    </div>
+    <div class="stat-card danger-card">
+        <h3>{{ overdue_deadlines }}</h3>
+        <p>Overdue Deadlines</p>
+    </div>
+</div>
+
+<div class="filters-card">
+    <form method="GET" action="{{ url_for('dashboard') }}" class="filters-row">
+        <input type="text" name="search" placeholder="Search company, role, source, notes..." value="{{ search }}">
+
+        <select name="status">
+            <option value="">All Statuses</option>
+            {% for s in status_options %}
+                <option value="{{ s }}" {% if status_filter == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+        </select>
+
+        <select name="priority">
+            <option value="">All Priorities</option>
+            {% for p in priority_options %}
+                <option value="{{ p }}" {% if priority_filter == p %}selected{% endif %}>{{ p }}</option>
+            {% endfor %}
+        </select>
+
+        <select name="source">
+            <option value="">All Sources</option>
+            {% for src in source_options %}
+                <option value="{{ src }}" {% if source_filter == src %}selected{% endif %}>{{ src }}</option>
+            {% endfor %}
+        </select>
+
+        <button type="submit" class="btn btn-secondary">Filter</button>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-light">Reset</a>
+    </form>
+</div>
+
+<div class="table-card">
+    <div class="table-wrap">
+        <table class="jobs-table">
+            <thead>
+                <tr>
+                    <th>Company</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Priority</th>
+                    <th>Source</th>
+                    <th>Mode</th>
+                    <th>Salary</th>
+                    <th>Applied</th>
+                    <th>Due</th>
+                    <th>Follow-up</th>
+                    <th>Resume Version</th>
+                    <th>Resume</th>
+                    <th>Interview Notes</th>
+                    <th>Rejection Reason</th>
+                    <th>JD Snapshot</th>
+                    <th>Notes</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if jobs %}
+                    {% for job in jobs %}
+                    <tr>
+                        <td>{{ job.company }}</td>
+                        <td>
+                            <div>{{ job.role }}</div>
+                            <small class="muted-text">{{ job.location or '-' }}</small>
+                        </td>
+                        <td>
+                            <span class="status-pill status-{{ job.status|lower|replace(' ', '-') }}">
+                                {{ job.status }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if job.priority %}
+                                <span class="priority-pill priority-{{ job.priority|lower }}">{{ job.priority }}</span>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td>{{ job.job_source or '-' }}</td>
+                        <td>{{ job.work_mode or '-' }}</td>
+                        <td>{{ job.salary or '-' }}</td>
+                        <td>{{ job.applied_date or '-' }}</td>
+                        <td>
+                            {% if job.due_date %}
+                                <span class="date-pill {{ job.due_badge }}">{{ job.due_date }}</span>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td>{{ job.follow_up_date or '-' }}</td>
+                        <td>{{ job.resume_version or '-' }}</td>
+                        <td>
+                            {% if job.resume_filename %}
+                                <a href="{{ url_for('preview_resume', filename=job.resume_filename) }}" target="_blank">
+                                    Preview PDF
+                                </a>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td class="long-cell">{{ job.interview_notes or '-' }}</td>
+                        <td class="long-cell">{{ job.rejection_reason or '-' }}</td>
+                        <td class="long-cell">{{ job.jd_text or '-' }}</td>
+                        <td class="long-cell">
+                            {% if job.link %}
+                                <a href="{{ job.link }}" target="_blank">Open Link</a><br>
+                            {% endif %}
+                            {{ job.notes or '-' }}
+                        </td>
+                        <td class="actions-cell">
+                            <a href="{{ url_for('edit_job', job_id=job.id) }}" class="action-link">Edit</a>
+
+                            <form method="POST"
+                                  action="{{ url_for('delete_job', job_id=job.id) }}"
+                                  onsubmit="return confirm('Delete this job?');">
+                                <button type="submit" class="delete-btn">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="17" class="empty-state">No job applications found.</td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}

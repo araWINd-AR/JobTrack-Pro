@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="hero">
+    <div>
+        <h1>Track every job application in one place</h1>
+        <p>
+            Stop guessing how many jobs you applied for. This tracker gives you login,
+            account creation, application counts, filters, notes, and a clean dashboard.
+        </p>
+        <div class="hero-actions">
+            <a href="{{ url_for('register') }}" class="btn btn-primary">Create Account</a>
+            <a href="{{ url_for('login') }}" class="btn btn-outline">Login</a>
+        </div>
+        <div class="demo-box">
+            <strong>Demo login</strong>
+            <p>Email: demo@example.com</p>
+            <p>Password: demo123</p>
+        </div>
+    </div>
+    <div class="preview-card">
+        <div class="mini-stats">
+            <div><span>58</span><small>Total</small></div>
+            <div><span>21</span><small>Applied</small></div>
+            <div><span>7</span><small>Interview</small></div>
+            <div><span>3</span><small>Offer</small></div>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Company</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td>Google</td><td>Data Analyst</td><td>Applied</td></tr>
+                <tr><td>Hudson</td><td>Business Analytics Intern</td><td>Interview</td></tr>
+                <tr><td>Amazon</td><td>Data Analyst Intern</td><td>Saved</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Tracker</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="{{ theme }}">
+    <div class="navbar">
+        <div class="brand">
+            <a href="{{ url_for('dashboard') if session.get('user_id') else url_for('login') }}">
+                JobTrack Pro
+            </a>
+        </div>
+
+        <div class="nav-links">
+            {% if session.get('user_id') %}
+                <div class="theme-switcher">
+                    <a href="{{ url_for('set_theme', mode='light') }}"
+                       class="theme-box {% if theme == 'light' %}active-theme{% endif %}">
+                        Light Theme
+                    </a>
+                    <a href="{{ url_for('set_theme', mode='dark') }}"
+                       class="theme-box {% if theme == 'dark' %}active-theme{% endif %}">
+                        Dark Theme
+                    </a>
+                </div>
+
+                <span class="welcome">Hi, {{ session.get('user_name') }}</span>
+                <a href="{{ url_for('logout') }}" class="btn btn-outline">Logout</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="page">
+        <div class="flash-wrap">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="flash {{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+        </div>
+
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>

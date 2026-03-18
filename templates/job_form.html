@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="form-page">
+    <div class="form-card">
+        <h1>{{ "Edit Job" if job else "Add New Job" }}</h1>
+        <p class="subtitle">
+            {{ "Update your application details below." if job else "Enter your application details below." }}
+        </p>
+
+        <form method="POST" enctype="multipart/form-data" class="job-form">
+            <div class="form-grid">
+
+                <div class="form-group">
+                    <label>Company *</label>
+                    <input type="text" name="company" value="{{ job.company if job else '' }}" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Role *</label>
+                    <input type="text" name="role" value="{{ job.role if job else '' }}" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Status *</label>
+                    <select name="status" required>
+                        {% for status in status_options %}
+                            <option value="{{ status }}"
+                                {% if job and job.status == status %}selected{% elif not job and status == 'Applied' %}selected{% endif %}>
+                                {{ status }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Priority</label>
+                    <select name="priority">
+                        <option value="">Select priority</option>
+                        {% for priority in priority_options %}
+                            <option value="{{ priority }}"
+                                {% if job and job.priority == priority %}selected{% endif %}>
+                                {{ priority }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Location</label>
+                    <input type="text" name="location" value="{{ job.location if job else '' }}">
+                </div>
+
+                <div class="form-group">
+                    <label>Work Mode</label>
+                    <select name="work_mode">
+                        <option value="">Select work mode</option>
+                        {% for mode in work_mode_options %}
+                            <option value="{{ mode }}"
+                                {% if job and job.work_mode == mode %}selected{% endif %}>
+                                {{ mode }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Applied Date</label>
+                    <input type="date" name="applied_date" value="{{ job.applied_date if job and job.applied_date else '' }}">
+                </div>
+
+                <div class="form-group">
+                    <label>Due Date</label>
+                    <input type="date" name="due_date" value="{{ job.due_date if job and job.due_date else '' }}">
+                </div>
+
+                <div class="form-group">
+                    <label>Follow-up Date</label>
+                    <input type="date" name="follow_up_date" value="{{ job.follow_up_date if job and job.follow_up_date else '' }}">
+                </div>
+
+                <div class="form-group">
+                    <label>Job Source</label>
+                    <select name="job_source">
+                        <option value="">Select source</option>
+                        {% for source in source_options %}
+                            <option value="{{ source }}"
+                                {% if job and job.job_source == source %}selected{% endif %}>
+                                {{ source }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Salary</label>
+                    <input type="text" name="salary" placeholder="$80,000 - $100,000" value="{{ job.salary if job else '' }}">
+                </div>
+
+                <div class="form-group">
+                    <label>Resume Version</label>
+                    <input type="text" name="resume_version" placeholder="Data Analyst v3" value="{{ job.resume_version if job else '' }}">
+                </div>
+
+                <div class="form-group full-width">
+                    <label>Job Link</label>
+                    <input
+                        type="url"
+                        name="link"
+                        placeholder="https://example.com/job-posting"
+                        value="{{ job.link if job else '' }}"
+                    >
+                </div>
+
+                <div class="form-group full-width">
+                    <label>General Notes</label>
+                    <textarea name="notes" rows="4">{{ job.notes if job else '' }}</textarea>
+                </div>
+
+                <div class="form-group full-width">
+                    <label>Interview Notes</label>
+                    <textarea name="interview_notes" rows="5" placeholder="Rounds, interviewer names, asked questions, your performance...">{{ job.interview_notes if job else '' }}</textarea>
+                </div>
+
+                <div class="form-group full-width">
+                    <label>Rejection Reason</label>
+                    <input type="text" name="rejection_reason" placeholder="Resume screened out / no response / rejected after interview" value="{{ job.rejection_reason if job else '' }}">
+                </div>
+
+                <div class="form-group full-width">
+                    <label>Job Description Snapshot</label>
+                    <textarea name="jd_text" rows="6" placeholder="Paste important parts of the job description here...">{{ job.jd_text if job else '' }}</textarea>
+                </div>
+
+                <div class="form-group full-width">
+                    <label>Upload Resume (PDF only)</label>
+                    <input type="file" name="resume" accept=".pdf,application/pdf">
+
+                    {% if job and job.resume_filename %}
+                        <div class="resume-box">
+                            <p>
+                                Current Resume:
+                                <a href="{{ url_for('preview_resume', filename=job.resume_filename) }}" target="_blank">
+                                    Preview PDF
+                                </a>
+                            </p>
+
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="remove_resume" value="yes">
+                                Remove current resume
+                            </label>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <a href="{{ url_for('dashboard') }}" class="btn btn-light">Cancel</a>
+                <button type="submit" class="btn btn-primary">
+                    {{ "Update Job" if job else "Add Job" }}
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% endblock %}
