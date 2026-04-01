@@ -114,6 +114,12 @@ def get_due_badge(due_date_value):
     return ""
 
 
+def redirect_if_logged_in():
+    if "user_id" in session:
+        return redirect(url_for("dashboard"))
+    return None
+
+
 def login_required(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -159,6 +165,10 @@ def index():
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
+    already_logged_in = redirect_if_logged_in()
+    if already_logged_in:
+        return already_logged_in
+
     if request.method == "POST":
         full_name = request.form.get("full_name", "").strip()
         email = request.form.get("email", "").strip().lower()
@@ -166,7 +176,7 @@ def register():
 
         if not full_name or not email or not password:
             flash("All fields are required.", "error")
-            return redirect(url_for("register"))
+            return render_template("register.html")
 
         supabase = get_supabase()
         existing = (
@@ -181,10 +191,10 @@ def register():
 
         if existing:
             flash(
-                "An account with this email already exists. Please login or use another email.",
+                "An account with this email already exists. Please use another email or login.",
                 "error",
             )
-            return redirect(url_for("login"))
+            return render_template("register.html")
 
         supabase.table("app_users").insert(
             {
@@ -202,6 +212,10 @@ def register():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    already_logged_in = redirect_if_logged_in()
+    if already_logged_in:
+        return already_logged_in
+
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "").strip()
@@ -227,7 +241,7 @@ def login():
             return redirect(url_for("dashboard"))
 
         flash("Invalid email or password.", "error")
-        return redirect(url_for("login"))
+        return render_template("login.html")
 
     return render_template("login.html")
 
