@@ -114,28 +114,6 @@ def get_due_badge(due_date_value):
     return ""
 
 
-def init_db():
-    supabase = get_supabase()
-    existing = (
-        supabase.table("app_users")
-        .select("id")
-        .eq("email", "demo@example.com")
-        .limit(1)
-        .execute()
-        .data
-        or []
-    )
-
-    if not existing:
-        supabase.table("app_users").insert(
-            {
-                "full_name": "Demo User",
-                "email": "demo@example.com",
-                "password_hash": generate_password_hash("demo123"),
-            }
-        ).execute()
-
-
 def login_required(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -202,7 +180,10 @@ def register():
         )
 
         if existing:
-            flash("Account already exists. Please login.", "error")
+            flash(
+                "An account with this email already exists. Please login or use another email.",
+                "error",
+            )
             return redirect(url_for("login"))
 
         supabase.table("app_users").insert(
@@ -674,9 +655,6 @@ def export_csv():
     response.headers["Content-type"] = "text/csv"
     return response
 
-
-
-init_db()
 
 if __name__ == "__main__":
     app.run(debug=True)
