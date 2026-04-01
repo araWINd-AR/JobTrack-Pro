@@ -129,7 +129,7 @@
                         <td>{{ job.resume_version or '-' }}</td>
                         <td>
                             {% if job.resume_filename %}
-                                <a href="{{ url_for('preview_resume', filename=job.resume_filename) }}" target="_blank">
+                                <a href="{{ url_for('preview_resume', storage_path=job.resume_filename) }}" target="_blank">
                                     Preview PDF
                                 </a>
                             {% else %}
@@ -141,7 +141,7 @@
                         <td class="long-cell">{{ job.jd_text or '-' }}</td>
                         <td class="long-cell">
                             {% if job.link %}
-                                <a href="{{ job.link }}" target="_blank">Open Link</a><br>
+                                <a href="{{ job.link }}" target="_blank" rel="noopener noreferrer">Open Link</a><br>
                             {% endif %}
                             {{ job.notes or '-' }}
                         </td>

@@ -140,7 +140,7 @@
                         <div class="resume-box">
                             <p>
                                 Current Resume:
-                                <a href="{{ url_for('preview_resume', filename=job.resume_filename) }}" target="_blank">
+                                <a href="{{ url_for('preview_resume', storage_path=job.resume_filename) }}" target="_blank">
                                     Preview PDF
                                 </a>
                             </p>

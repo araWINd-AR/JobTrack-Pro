@@ -1,37 +1,32 @@
-import os
-import sqlite3
 import csv
 import io
-from datetime import date, datetime
+import os
+from datetime import date
 from functools import wraps
 from uuid import uuid4
 
 from flask import (
     Flask,
     flash,
+    make_response,
     redirect,
     render_template,
     request,
-    send_from_directory,
+    send_file,
     session,
     url_for,
-    make_response,
 )
+from dotenv import load_dotenv
+from supabase import Client, create_client
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
+load_dotenv()
+
 app = Flask(__name__)
-app.secret_key = "change-this-secret-key"
+app.secret_key = os.getenv("SECRET_KEY", "change-this-secret-key")
 
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-DATABASE = os.path.join(BASE_DIR, "jobtracker.db")
-UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
 ALLOWED_EXTENSIONS = {"pdf"}
-
-app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
-
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 STATUS_OPTIONS = [
     "Saved",
@@ -44,7 +39,9 @@ STATUS_OPTIONS = [
 ]
 
 PRIORITY_OPTIONS = ["High", "Medium", "Low"]
+
 WORK_MODE_OPTIONS = ["Remote", "Hybrid", "Onsite"]
+
 JOB_SOURCE_OPTIONS = [
     "LinkedIn",
     "Indeed",
@@ -55,83 +52,51 @@ JOB_SOURCE_OPTIONS = [
     "Other",
 ]
 
-
-def get_db_connection():
-    conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row
-    return conn
+SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "resumes")
 
 
-def allowed_file(filename):
+def require_env(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
+
+def validate_supabase_url(url: str) -> str:
+    url = url.strip()
+    if not url.startswith("https://") or ".supabase.co" not in url:
+        raise RuntimeError(
+            "SUPABASE_URL is invalid. It must look like: https://your-project-ref.supabase.co"
+        )
+    return url
+
+
+def get_supabase() -> Client:
+    url = validate_supabase_url(require_env("SUPABASE_URL"))
+    key = require_env("SUPABASE_SERVICE_ROLE_KEY")
+    return create_client(url, key)
+
+
+def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def init_db():
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            full_name TEXT NOT NULL DEFAULT 'User',
-            email TEXT NOT NULL UNIQUE,
-            password TEXT NOT NULL
-        )
-    """)
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS jobs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            company TEXT NOT NULL,
-            role TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'Applied',
-            location TEXT,
-            applied_date TEXT,
-            due_date TEXT,
-            follow_up_date TEXT,
-            priority TEXT,
-            job_source TEXT,
-            salary TEXT,
-            work_mode TEXT,
-            resume_version TEXT,
-            interview_notes TEXT,
-            rejection_reason TEXT,
-            jd_text TEXT,
-            link TEXT,
-            notes TEXT,
-            resume_filename TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    """)
-
-    demo_email = "demo@example.com"
-    demo_password = "demo123"
-
-    existing_user = cur.execute(
-        "SELECT * FROM users WHERE email = ?",
-        (demo_email,)
-    ).fetchone()
-
-    if not existing_user:
-        cur.execute(
-            "INSERT INTO users (full_name, email, password) VALUES (?, ?, ?)",
-            ("Demo User", demo_email, generate_password_hash(demo_password))
-        )
-
-    conn.commit()
-    conn.close()
+def to_date_value(value):
+    if not value:
+        return ""
+    if isinstance(value, str):
+        return value[:10]
+    return str(value)[:10]
 
 
-def login_required(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if "user_id" not in session:
-            flash("Please login first.", "error")
-            return redirect(url_for("login"))
-        return func(*args, **kwargs)
-    return wrapper
+def sort_key(job: dict):
+    due = job.get("due_date") or ""
+    created = job.get("created_at") or ""
+    return (1 if not due else 0, due or "9999-12-31", created)
+
+
+def one_or_none(rows):
+    return rows[0] if rows else None
 
 
 def get_today_str():
@@ -141,9 +106,7 @@ def get_today_str():
 def get_due_badge(due_date_value):
     if not due_date_value:
         return ""
-
     today = get_today_str()
-
     if due_date_value < today:
         return "overdue"
     if due_date_value == today:
@@ -151,12 +114,55 @@ def get_due_badge(due_date_value):
     return ""
 
 
+def init_db():
+    supabase = get_supabase()
+    existing = (
+        supabase.table("app_users")
+        .select("id")
+        .eq("email", "demo@example.com")
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+
+    if not existing:
+        supabase.table("app_users").insert(
+            {
+                "full_name": "Demo User",
+                "email": "demo@example.com",
+                "password_hash": generate_password_hash("demo123"),
+            }
+        ).execute()
+
+
+def login_required(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if "user_id" not in session:
+            flash("Please login first.", "error")
+            return redirect(url_for("login"))
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
 @app.context_processor
 def inject_globals():
     return {
         "theme": session.get("theme", "light"),
-        "today_date": get_today_str()
+        "today_date": get_today_str(),
     }
+
+
+@app.route("/health")
+def health():
+    try:
+        supabase = get_supabase()
+        supabase.table("app_users").select("id").limit(1).execute()
+        return {"status": "ok", "storage": "supabase"}, 200
+    except Exception as exc:
+        return {"status": "error", "storage": "supabase", "message": str(exc)}, 500
 
 
 @app.route("/theme/<mode>")
@@ -184,23 +190,28 @@ def register():
             flash("All fields are required.", "error")
             return redirect(url_for("register"))
 
-        conn = get_db_connection()
-        existing = conn.execute(
-            "SELECT * FROM users WHERE email = ?",
-            (email,)
-        ).fetchone()
+        supabase = get_supabase()
+        existing = (
+            supabase.table("app_users")
+            .select("id")
+            .eq("email", email)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
 
         if existing:
-            conn.close()
             flash("Account already exists. Please login.", "error")
             return redirect(url_for("login"))
 
-        conn.execute(
-            "INSERT INTO users (full_name, email, password) VALUES (?, ?, ?)",
-            (full_name, email, generate_password_hash(password))
-        )
-        conn.commit()
-        conn.close()
+        supabase.table("app_users").insert(
+            {
+                "full_name": full_name,
+                "email": email,
+                "password_hash": generate_password_hash(password),
+            }
+        ).execute()
 
         flash("Account created successfully. Please login.", "success")
         return redirect(url_for("login"))
@@ -214,16 +225,21 @@ def login():
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "").strip()
 
-        conn = get_db_connection()
-        user = conn.execute(
-            "SELECT * FROM users WHERE email = ?",
-            (email,)
-        ).fetchone()
-        conn.close()
+        supabase = get_supabase()
+        rows = (
+            supabase.table("app_users")
+            .select("*")
+            .eq("email", email)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        user = one_or_none(rows)
 
-        if user and check_password_hash(user["password"], password):
+        if user and check_password_hash(user["password_hash"], password):
             session["user_id"] = user["id"]
-            session["user_name"] = user["full_name"] if "full_name" in user.keys() else "User"
+            session["user_name"] = user.get("full_name") or "User"
             if "theme" not in session:
                 session["theme"] = "light"
             flash("Logged in successfully.", "success")
@@ -244,89 +260,76 @@ def logout():
     return redirect(url_for("login"))
 
 
+def fetch_user_jobs(user_id: int):
+    supabase = get_supabase()
+    rows = supabase.table("jobs").select("*").eq("user_id", user_id).execute().data or []
+
+    for job in rows:
+        for key in ["applied_date", "due_date", "follow_up_date", "created_at"]:
+            if key in job and job[key] is not None:
+                job[key] = str(job[key])
+        job["due_badge"] = get_due_badge(to_date_value(job.get("due_date")))
+
+    rows.sort(key=sort_key)
+    return rows
+
+
 @app.route("/dashboard")
 @login_required
 def dashboard():
-    search = request.args.get("search", "").strip()
+    search = request.args.get("search", "").strip().lower()
     status_filter = request.args.get("status", "").strip()
     priority_filter = request.args.get("priority", "").strip()
     source_filter = request.args.get("source", "").strip()
 
-    conn = get_db_connection()
+    jobs = fetch_user_jobs(session["user_id"])
 
-    query = "SELECT * FROM jobs WHERE user_id = ?"
-    params = [session["user_id"]]
+    filtered = []
+    for job in jobs:
+        haystack = " ".join(
+            [
+                str(job.get("company") or ""),
+                str(job.get("role") or ""),
+                str(job.get("location") or ""),
+                str(job.get("notes") or ""),
+                str(job.get("interview_notes") or ""),
+                str(job.get("jd_text") or ""),
+                str(job.get("rejection_reason") or ""),
+                str(job.get("job_source") or ""),
+            ]
+        ).lower()
 
-    if search:
-        query += """ AND (
-            company LIKE ? OR role LIKE ? OR location LIKE ? OR notes LIKE ? OR
-            interview_notes LIKE ? OR jd_text LIKE ? OR rejection_reason LIKE ? OR job_source LIKE ?
-        )"""
-        keyword = f"%{search}%"
-        params.extend([keyword, keyword, keyword, keyword, keyword, keyword, keyword, keyword])
+        if search and search not in haystack:
+            continue
+        if status_filter and job.get("status") != status_filter:
+            continue
+        if priority_filter and job.get("priority") != priority_filter:
+            continue
+        if source_filter and job.get("job_source") != source_filter:
+            continue
+        filtered.append(job)
 
-    if status_filter:
-        query += " AND status = ?"
-        params.append(status_filter)
-
-    if priority_filter:
-        query += " AND priority = ?"
-        params.append(priority_filter)
-
-    if source_filter:
-        query += " AND job_source = ?"
-        params.append(source_filter)
-
-    query += """
-        ORDER BY
-            CASE WHEN due_date IS NULL OR due_date = '' THEN 1 ELSE 0 END,
-            due_date ASC,
-            created_at DESC
-    """
-
-    jobs_raw = conn.execute(query, params).fetchall()
-
-    jobs = []
-    for row in jobs_raw:
-        job = dict(row)
-        job["due_badge"] = get_due_badge(job.get("due_date"))
-        jobs.append(job)
-
-    total_count = conn.execute(
-        "SELECT COUNT(*) AS count FROM jobs WHERE user_id = ?",
-        (session["user_id"],)
-    ).fetchone()["count"]
-
-    counts = {}
-    for status in STATUS_OPTIONS:
-        counts[status] = conn.execute(
-            "SELECT COUNT(*) AS count FROM jobs WHERE user_id = ? AND status = ?",
-            (session["user_id"], status)
-        ).fetchone()["count"]
-
-    upcoming_followups = conn.execute("""
-        SELECT COUNT(*) AS count
-        FROM jobs
-        WHERE user_id = ?
-          AND follow_up_date IS NOT NULL
-          AND follow_up_date != ''
-          AND follow_up_date >= ?
-    """, (session["user_id"], get_today_str())).fetchone()["count"]
-
-    overdue_deadlines = conn.execute("""
-        SELECT COUNT(*) AS count
-        FROM jobs
-        WHERE user_id = ?
-          AND due_date IS NOT NULL
-          AND due_date != ''
-          AND due_date < ?
-    """, (session["user_id"], get_today_str())).fetchone()["count"]
-
-    conn.close()
+    total_count = len(jobs)
+    counts = {
+        status: sum(1 for job in jobs if job.get("status") == status)
+        for status in STATUS_OPTIONS
+    }
+    upcoming_followups = sum(
+        1
+        for job in jobs
+        if (job.get("follow_up_date") or "")[:10] >= get_today_str()
+        and job.get("follow_up_date")
+    )
+    overdue_deadlines = sum(
+        1
+        for job in jobs
+        if (job.get("due_date") or "")[:10] < get_today_str()
+        and job.get("due_date")
+    )
 
     return render_template(
         "dashboard.html",
-        jobs=jobs,
+        jobs=filtered,
         search=search,
         status_filter=status_filter,
         priority_filter=priority_filter,
@@ -340,6 +343,45 @@ def dashboard():
         upcoming_followups=upcoming_followups,
         overdue_deadlines=overdue_deadlines,
     )
+
+
+def upload_resume(file_storage, user_id: int):
+    if not file_storage or not file_storage.filename:
+        return None
+
+    safe_name = secure_filename(file_storage.filename)
+    if not safe_name:
+        return None
+
+    if not allowed_file(safe_name):
+        raise ValueError("Only PDF resumes are allowed.")
+
+    unique_name = f"{uuid4().hex}_{safe_name}"
+    storage_path = f"user_{user_id}/{unique_name}"
+
+    file_storage.seek(0)
+    file_bytes = file_storage.read()
+    if not file_bytes:
+        raise ValueError("Uploaded file is empty.")
+
+    supabase = get_supabase()
+    supabase.storage.from_(SUPABASE_BUCKET).upload(
+        path=storage_path,
+        file=file_bytes,
+        file_options={
+            "content-type": file_storage.mimetype or "application/pdf",
+            "upsert": "false",
+        },
+    )
+
+    return storage_path
+
+
+def delete_resume(storage_path):
+    if not storage_path:
+        return
+    supabase = get_supabase()
+    supabase.storage.from_(SUPABASE_BUCKET).remove([storage_path])
 
 
 @app.route("/job/add", methods=["GET", "POST"])
@@ -370,59 +412,43 @@ def add_job():
 
         if status not in STATUS_OPTIONS:
             status = "Applied"
-
         if priority and priority not in PRIORITY_OPTIONS:
             priority = ""
-
         if work_mode and work_mode not in WORK_MODE_OPTIONS:
             work_mode = ""
 
-        resume_filename = None
+        resume_path = None
         resume_file = request.files.get("resume")
+        try:
+            if resume_file and resume_file.filename:
+                resume_path = upload_resume(resume_file, session["user_id"])
+        except Exception as exc:
+            flash(f"Resume upload failed: {exc}", "error")
+            return redirect(url_for("add_job"))
 
-        if resume_file and resume_file.filename:
-            if not allowed_file(resume_file.filename):
-                flash("Only PDF resumes are allowed.", "error")
-                return redirect(url_for("add_job"))
-
-            safe_name = secure_filename(resume_file.filename)
-            unique_name = f"{uuid4().hex}_{safe_name}"
-            resume_file.save(os.path.join(app.config["UPLOAD_FOLDER"], unique_name))
-            resume_filename = unique_name
-
-        conn = get_db_connection()
-        conn.execute("""
-            INSERT INTO jobs (
-                user_id, company, role, status, location,
-                applied_date, due_date, follow_up_date, priority,
-                job_source, salary, work_mode, resume_version,
-                interview_notes, rejection_reason, jd_text,
-                link, notes, resume_filename
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            session["user_id"],
-            company,
-            role,
-            status,
-            location,
-            applied_date if applied_date else None,
-            due_date if due_date else None,
-            follow_up_date if follow_up_date else None,
-            priority if priority else None,
-            job_source if job_source else None,
-            salary if salary else None,
-            work_mode if work_mode else None,
-            resume_version if resume_version else None,
-            interview_notes if interview_notes else None,
-            rejection_reason if rejection_reason else None,
-            jd_text if jd_text else None,
-            link if link else None,
-            notes if notes else None,
-            resume_filename,
-        ))
-        conn.commit()
-        conn.close()
+        get_supabase().table("jobs").insert(
+            {
+                "user_id": session["user_id"],
+                "company": company,
+                "role": role,
+                "status": status,
+                "location": location or None,
+                "applied_date": applied_date or None,
+                "due_date": due_date or None,
+                "follow_up_date": follow_up_date or None,
+                "priority": priority or None,
+                "job_source": job_source or None,
+                "salary": salary or None,
+                "work_mode": work_mode or None,
+                "resume_version": resume_version or None,
+                "interview_notes": interview_notes or None,
+                "rejection_reason": rejection_reason or None,
+                "jd_text": jd_text or None,
+                "link": link or None,
+                "notes": notes or None,
+                "resume_filename": resume_path,
+            }
+        ).execute()
 
         flash("Job added successfully.", "success")
         return redirect(url_for("dashboard"))
@@ -440,14 +466,20 @@ def add_job():
 @app.route("/job/edit/<int:job_id>", methods=["GET", "POST"])
 @login_required
 def edit_job(job_id):
-    conn = get_db_connection()
-    job = conn.execute(
-        "SELECT * FROM jobs WHERE id = ? AND user_id = ?",
-        (job_id, session["user_id"])
-    ).fetchone()
+    supabase = get_supabase()
+    rows = (
+        supabase.table("jobs")
+        .select("*")
+        .eq("id", job_id)
+        .eq("user_id", session["user_id"])
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    job = one_or_none(rows)
 
     if not job:
-        conn.close()
         flash("Job not found.", "error")
         return redirect(url_for("dashboard"))
 
@@ -472,81 +504,58 @@ def edit_job(job_id):
         remove_resume = request.form.get("remove_resume")
 
         if not company or not role:
-            conn.close()
             flash("Company and role are required.", "error")
             return redirect(url_for("edit_job", job_id=job_id))
 
         if status not in STATUS_OPTIONS:
             status = "Applied"
-
         if priority and priority not in PRIORITY_OPTIONS:
             priority = ""
-
         if work_mode and work_mode not in WORK_MODE_OPTIONS:
             work_mode = ""
 
-        resume_filename = job["resume_filename"]
+        resume_path = job.get("resume_filename")
 
-        if remove_resume == "yes" and resume_filename:
-            old_path = os.path.join(app.config["UPLOAD_FOLDER"], resume_filename)
-            if os.path.exists(old_path):
-                os.remove(old_path)
-            resume_filename = None
+        try:
+            if remove_resume == "yes" and resume_path:
+                delete_resume(resume_path)
+                resume_path = None
 
-        resume_file = request.files.get("resume")
-        if resume_file and resume_file.filename:
-            if not allowed_file(resume_file.filename):
-                conn.close()
-                flash("Only PDF resumes are allowed.", "error")
-                return redirect(url_for("edit_job", job_id=job_id))
+            resume_file = request.files.get("resume")
+            if resume_file and resume_file.filename:
+                if resume_path:
+                    delete_resume(resume_path)
+                resume_path = upload_resume(resume_file, session["user_id"])
+        except Exception as exc:
+            flash(f"Resume update failed: {exc}", "error")
+            return redirect(url_for("edit_job", job_id=job_id))
 
-            if resume_filename:
-                old_path = os.path.join(app.config["UPLOAD_FOLDER"], resume_filename)
-                if os.path.exists(old_path):
-                    os.remove(old_path)
-
-            safe_name = secure_filename(resume_file.filename)
-            unique_name = f"{uuid4().hex}_{safe_name}"
-            resume_file.save(os.path.join(app.config["UPLOAD_FOLDER"], unique_name))
-            resume_filename = unique_name
-
-        conn.execute("""
-            UPDATE jobs
-            SET company = ?, role = ?, status = ?, location = ?,
-                applied_date = ?, due_date = ?, follow_up_date = ?, priority = ?,
-                job_source = ?, salary = ?, work_mode = ?, resume_version = ?,
-                interview_notes = ?, rejection_reason = ?, jd_text = ?,
-                link = ?, notes = ?, resume_filename = ?
-            WHERE id = ? AND user_id = ?
-        """, (
-            company,
-            role,
-            status,
-            location,
-            applied_date if applied_date else None,
-            due_date if due_date else None,
-            follow_up_date if follow_up_date else None,
-            priority if priority else None,
-            job_source if job_source else None,
-            salary if salary else None,
-            work_mode if work_mode else None,
-            resume_version if resume_version else None,
-            interview_notes if interview_notes else None,
-            rejection_reason if rejection_reason else None,
-            jd_text if jd_text else None,
-            link if link else None,
-            notes if notes else None,
-            resume_filename,
-            job_id,
-            session["user_id"],
-        ))
-        conn.commit()
-        conn.close()
+        supabase.table("jobs").update(
+            {
+                "company": company,
+                "role": role,
+                "status": status,
+                "location": location or None,
+                "applied_date": applied_date or None,
+                "due_date": due_date or None,
+                "follow_up_date": follow_up_date or None,
+                "priority": priority or None,
+                "job_source": job_source or None,
+                "salary": salary or None,
+                "work_mode": work_mode or None,
+                "resume_version": resume_version or None,
+                "interview_notes": interview_notes or None,
+                "rejection_reason": rejection_reason or None,
+                "jd_text": jd_text or None,
+                "link": link or None,
+                "notes": notes or None,
+                "resume_filename": resume_path,
+            }
+        ).eq("id", job_id).eq("user_id", session["user_id"]).execute()
 
         flash("Job updated successfully.", "success")
         return redirect(url_for("dashboard"))
 
-    conn.close()
     return render_template(
         "job_form.html",
         job=job,
@@ -560,82 +569,105 @@ def edit_job(job_id):
 @app.route("/job/delete/<int:job_id>", methods=["POST"])
 @login_required
 def delete_job(job_id):
-    conn = get_db_connection()
-    job = conn.execute(
-        "SELECT * FROM jobs WHERE id = ? AND user_id = ?",
-        (job_id, session["user_id"])
-    ).fetchone()
+    supabase = get_supabase()
+    rows = (
+        supabase.table("jobs")
+        .select("resume_filename")
+        .eq("id", job_id)
+        .eq("user_id", session["user_id"])
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    job = one_or_none(rows)
 
     if not job:
-        conn.close()
         flash("Job not found.", "error")
         return redirect(url_for("dashboard"))
 
-    if job["resume_filename"]:
-        file_path = os.path.join(app.config["UPLOAD_FOLDER"], job["resume_filename"])
-        if os.path.exists(file_path):
-            os.remove(file_path)
+    if job.get("resume_filename"):
+        delete_resume(job["resume_filename"])
 
-    conn.execute(
-        "DELETE FROM jobs WHERE id = ? AND user_id = ?",
-        (job_id, session["user_id"])
-    )
-    conn.commit()
-    conn.close()
-
+    supabase.table("jobs").delete().eq("id", job_id).eq("user_id", session["user_id"]).execute()
     flash("Job deleted successfully.", "success")
     return redirect(url_for("dashboard"))
 
 
-@app.route("/resume/<filename>")
+@app.route("/resume/<path:storage_path>")
 @login_required
-def preview_resume(filename):
-    return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
+def preview_resume(storage_path):
+    expected_prefix = f"user_{session['user_id']}/"
+    if not storage_path.startswith(expected_prefix):
+        flash("Access denied.", "error")
+        return redirect(url_for("dashboard"))
+
+    data = get_supabase().storage.from_(SUPABASE_BUCKET).download(storage_path)
+    filename = os.path.basename(storage_path)
+
+    return send_file(
+        io.BytesIO(data),
+        mimetype="application/pdf",
+        download_name=filename,
+        as_attachment=False,
+    )
 
 
 @app.route("/export/csv")
 @login_required
 def export_csv():
-    conn = get_db_connection()
-    jobs = conn.execute(
-        "SELECT * FROM jobs WHERE user_id = ? ORDER BY created_at DESC",
-        (session["user_id"],)
-    ).fetchall()
-    conn.close()
+    jobs = fetch_user_jobs(session["user_id"])
 
     output = io.StringIO()
     writer = csv.writer(output)
 
     headers = [
-        "Company", "Role", "Status", "Location", "Applied Date", "Due Date",
-        "Follow Up Date", "Priority", "Job Source", "Salary", "Work Mode",
-        "Resume Version", "Interview Notes", "Rejection Reason",
-        "JD Snapshot", "Link", "Notes", "Resume File", "Created At"
+        "Company",
+        "Role",
+        "Status",
+        "Location",
+        "Applied Date",
+        "Due Date",
+        "Follow Up Date",
+        "Priority",
+        "Job Source",
+        "Salary",
+        "Work Mode",
+        "Resume Version",
+        "Interview Notes",
+        "Rejection Reason",
+        "JD Snapshot",
+        "Link",
+        "Notes",
+        "Resume File",
+        "Created At",
     ]
     writer.writerow(headers)
 
     for job in jobs:
-        writer.writerow([
-            job["company"],
-            job["role"],
-            job["status"],
-            job["location"],
-            job["applied_date"],
-            job["due_date"],
-            job["follow_up_date"],
-            job["priority"],
-            job["job_source"],
-            job["salary"],
-            job["work_mode"],
-            job["resume_version"],
-            job["interview_notes"],
-            job["rejection_reason"],
-            job["jd_text"],
-            job["link"],
-            job["notes"],
-            job["resume_filename"],
-            job["created_at"],
-        ])
+        writer.writerow(
+            [
+                job.get("company"),
+                job.get("role"),
+                job.get("status"),
+                job.get("location"),
+                job.get("applied_date"),
+                job.get("due_date"),
+                job.get("follow_up_date"),
+                job.get("priority"),
+                job.get("job_source"),
+                job.get("salary"),
+                job.get("work_mode"),
+                job.get("resume_version"),
+                job.get("interview_notes"),
+                job.get("rejection_reason"),
+                job.get("jd_text"),
+                job.get("link"),
+                job.get("notes"),
+                job.get("resume_filename"),
+                job.get("created_at"),
+            ]
+        )
 
     response = make_response(output.getvalue())
     response.headers["Content-Disposition"] = "attachment; filename=job_applications.csv"
